@@ -1,6 +1,6 @@
 # AgriProfit Python
 
-This version of AgriProfit runs as a simple Python API.
+This version of AgriProfit runs as a simple Python API with a live browser homepage.
 
 ## Run locally
 
@@ -24,8 +24,9 @@ uvicorn app.main:app --reload
 
 ## Notes
 
-- By default, the API works without a database and returns built-in sample dashboard data.
-- If you want to enable PostgreSQL later, set `DATABASE_URL` before starting the server.
+- By default, the app now uses a local SQLite database at `agriprofit.db`.
+- If you want to use PostgreSQL later, set `DATABASE_URL` before starting the server.
+- The homepage at `/` includes live forms for creating farmers, crop plans, inputs, and harvests.
 - The most useful standalone endpoints right now are:
   - `/analytics/dashboard`
   - `/analytics/fertilizer-recommendation?crop=maize&soil_type=loam&acres=2`
