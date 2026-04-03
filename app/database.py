@@ -4,6 +4,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+
+
+def load_local_env():
+    if not os.path.exists(ENV_PATH):
+        return
+
+    with open(ENV_PATH, "r", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+load_local_env()
+
 DEFAULT_DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'agriprofit.db')}"
 DATABASE_URL = os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL
 
