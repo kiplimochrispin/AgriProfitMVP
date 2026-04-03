@@ -24,6 +24,16 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserUpdate(BaseModel):
+    phone: str | None = None
+    email: str | None = None
+    full_name: str | None = None
+    role: str | None = None
+    county: str | None = None
+    farm_size_acres: float | None = None
+    soil_type: str | None = None
+
+
 class CropPlanBase(BaseModel):
     user_id: str
     crop_type: str
@@ -42,6 +52,15 @@ class CropPlanRead(CropPlanBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CropPlanUpdate(BaseModel):
+    user_id: str | None = None
+    crop_type: str | None = None
+    acres: float | None = None
+    planting_date: date | None = None
+    expected_yield_kg_per_acre: int | None = None
+    season_year: int | None = None
 
 
 class InputUsageBase(BaseModel):
@@ -68,6 +87,19 @@ class InputUsageRead(InputUsageBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class InputUsageUpdate(BaseModel):
+    user_id: str | None = None
+    crop_plan_id: str | None = None
+    item_name: str | None = None
+    category: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    cost_ksh: float | None = None
+    acres_applied: float | None = None
+    application_date: date | None = None
+    notes: str | None = None
+
+
 class HarvestRecordBase(BaseModel):
     crop_plan_id: str
     actual_yield_kg_total: float | None = None
@@ -84,6 +116,13 @@ class HarvestRecordRead(HarvestRecordBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HarvestRecordUpdate(BaseModel):
+    crop_plan_id: str | None = None
+    actual_yield_kg_total: float | None = None
+    selling_price_per_kg: float | None = None
+    other_costs_ksh: float | None = None
 
 
 class FertilizerRecommendationBase(BaseModel):
@@ -106,3 +145,13 @@ class FertilizerRecommendationRead(FertilizerRecommendationBase):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
