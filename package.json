@@ -1,0 +1,7 @@
+{
+  "name": "agriprofit-frontend",
+  "private": true,
+  "scripts": {
+    "build:frontend": "tsc -p tsconfig.json"
+  }
+}

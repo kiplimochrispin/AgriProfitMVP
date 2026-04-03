@@ -1,6 +1,6 @@
 # AgriProfit Python
 
-This version of AgriProfit runs as a Python API with a live browser homepage, SQLite by default, and authenticated record management.
+This version of AgriProfit runs as a Python API with a TypeScript browser frontend, SQLite by default, and authenticated record management.
 
 ## Run locally
 
@@ -26,7 +26,7 @@ uvicorn app.main:app --reload
 
 - By default, the app now uses a local SQLite database at `agriprofit.db`.
 - If you want to use PostgreSQL later, set `DATABASE_URL` before starting the server.
-- The homepage at `/` includes live forms for creating farmers, crop plans, inputs, and harvests.
+- The homepage at `/` is rendered by a TypeScript frontend compiled into `static/main.js`.
 - Create a local `.env` from `.env.example` if you want to override database or admin credentials.
 - Mutating routes now require login.
 - The most useful standalone endpoints right now are:
@@ -37,6 +37,7 @@ uvicorn app.main:app --reload
 ## Run Tests
 
 ```bash
+npm run build:frontend
 python -m unittest tests/test_app_flows.py
 ```
 
