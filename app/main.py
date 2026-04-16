@@ -7,7 +7,7 @@ import time
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,9 +28,27 @@ from app.routers.users import router as users_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
-TEMPLATE_DIR = BASE_DIR / "templates"
 logger = logging.getLogger("agriprofit.http")
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000").split(",") if origin.strip()]
+APP_SHELL = """<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgriProfit MVP</title>
+    <meta name="theme-color" content="#203328" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="AgriProfit" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/static/main.js"></script>
+  </body>
+</html>
+"""
 
 app = FastAPI(title="AgriProfit MVP - Uasin Gishu", version="0.1.0")
 
@@ -72,7 +90,13 @@ def on_startup():
 
 @app.get("/", include_in_schema=False)
 def read_root():
-    return FileResponse(TEMPLATE_DIR / "index.html")
+    return HTMLResponse(APP_SHELL)
+
+
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/{path:path}", include_in_schema=False)
+def read_dashboard(path: str = ""):
+    return HTMLResponse(APP_SHELL)
 
 
 @app.get("/api")

@@ -24,7 +24,6 @@ agriprofit/
 ├── scripts/
 ├── src/frontend/
 ├── static/
-├── templates/
 ├── tests/
 ├── docker-compose.yml
 └── package.json
