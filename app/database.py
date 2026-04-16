@@ -1,6 +1,7 @@
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -24,6 +25,7 @@ load_local_env()
 
 DEFAULT_DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'agriprofit.db')}"
 DATABASE_URL = os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL
+AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "").lower() in {"1", "true", "yes"}
 
 engine = (
     create_engine(
@@ -37,6 +39,30 @@ SessionLocal = (
     sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
 )
 Base = declarative_base()
+
+
+def database_backend(url: str | None = None) -> str:
+    active_url = url or DATABASE_URL or ""
+    if active_url.startswith("postgresql"):
+        return "postgresql"
+    if active_url.startswith("sqlite"):
+        return "sqlite"
+    return "unknown"
+
+
+def using_default_sqlite() -> bool:
+    return DATABASE_URL == DEFAULT_DATABASE_URL
+
+
+def database_is_ready() -> bool:
+    if engine is None:
+        return False
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except SQLAlchemyError:
+        return False
 
 SEED_RECOMMENDATIONS = [
     {
@@ -121,10 +147,28 @@ def init_db():
     if engine is None:
         return
     from app import models
+    from app.security import ADMIN_PASSWORD, ADMIN_PHONE, ADMIN_USERNAME, hash_password
 
-    Base.metadata.create_all(bind=engine)
+    should_create_schema = AUTO_CREATE_SCHEMA or database_backend() == "sqlite"
+    if should_create_schema:
+        Base.metadata.create_all(bind=engine)
+
     db = SessionLocal()
     try:
+        admin_user = db.query(models.User).filter(models.User.username == ADMIN_USERNAME).first()
+        if admin_user is None:
+            db.add(
+                models.User(
+                    username=ADMIN_USERNAME,
+                    phone=ADMIN_PHONE,
+                    password_hash=hash_password(ADMIN_PASSWORD),
+                    full_name="System Admin",
+                    role="admin",
+                    county="Uasin Gishu",
+                    is_active=True,
+                )
+            )
+            db.commit()
         if db.query(models.FertilizerRecommendation).count() == 0:
             db.add_all(models.FertilizerRecommendation(**item) for item in SEED_RECOMMENDATIONS)
             db.commit()

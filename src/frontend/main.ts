@@ -1,8 +1,11 @@
 type User = {
   id: string;
+  username: string;
   phone: string;
   email?: string | null;
   full_name?: string | null;
+  role: string;
+  is_active?: boolean;
   county: string;
   soil_type?: string | null;
 };
@@ -50,13 +53,54 @@ type DashboardData = {
   };
 };
 
+type OverviewData = {
+  database: {
+    backend: string;
+    using_default_sqlite: boolean;
+  };
+  counts: {
+    users: number;
+    crop_plans: number;
+    inputs: number;
+    harvests: number;
+    fertilizer_recommendations: number;
+  };
+  latest: {
+    user_name?: string | null;
+    crop_type?: string | null;
+    season_year?: number | null;
+  };
+  recent_activity: Array<{
+    type: string;
+    title: string;
+    detail: string;
+    created_at: string;
+  }>;
+};
+
+type AppStatus = {
+  installable_web_app: boolean;
+  database: {
+    backend: string;
+    configured: boolean;
+    using_default_sqlite: boolean;
+  };
+};
+
 type AuthResponse = {
   access_token: string;
   token_type: string;
+  user: User;
+};
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
 const storageKeys = {
   token: "agriprofit.authToken",
+  authUser: "agriprofit.authUser",
   userId: "agriprofit.activeUserId",
   cropPlanId: "agriprofit.activeCropPlanId",
 } as const;
@@ -74,6 +118,7 @@ const state: {
 };
 
 const root = document.getElementById("app");
+let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 
 if (!root) {
   throw new Error("Missing #app root element");
@@ -89,8 +134,34 @@ root.innerHTML = `
           <div class="brand-note">Profit-first farm intelligence</div>
         </div>
       </div>
-      <div class="status-pill">TypeScript frontend • live preview from <code>/analytics/dashboard</code></div>
+      <div class="masthead-actions">
+        <div class="status-pill" id="platform-pill">TypeScript frontend • live preview from <code>/analytics/dashboard</code></div>
+        <button class="button alt install-button hidden" type="button" id="install-app-button">Install Web App</button>
+      </div>
     </header>
+
+    <section class="app-strip">
+      <div class="panel strip-card">
+        <div class="strip-label">Database Mode</div>
+        <div class="strip-value" id="database-mode">--</div>
+        <div class="strip-meta" id="database-note">Waiting for runtime status.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Farmers</div>
+        <div class="strip-value" id="count-users">0</div>
+        <div class="strip-meta" id="latest-user">No farmer records yet.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Crop Plans</div>
+        <div class="strip-value" id="count-plans">0</div>
+        <div class="strip-meta" id="latest-plan">No crop plans yet.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Data Coverage</div>
+        <div class="strip-value" id="count-records">0</div>
+        <div class="strip-meta" id="record-summary">Inputs and harvests are empty.</div>
+      </div>
+    </section>
 
     <section class="hero">
       <div class="panel hero-copy">
@@ -178,7 +249,7 @@ root.innerHTML = `
 
         <form id="login-form" class="stack">
           <div class="field-grid">
-            <label>Username<input name="username" value="admin" required /></label>
+            <label>Username Or Phone<input name="username" value="admin" required /></label>
             <label>Password<input name="password" type="password" value="admin123" required /></label>
           </div>
           <div class="form-actions">
@@ -200,9 +271,18 @@ root.innerHTML = `
         <div class="stack">
           <form id="user-form" class="stack">
             <div class="field-grid">
+              <label>Username<input name="username" placeholder="farmer1" required /></label>
               <label>Farmer Name<input name="full_name" placeholder="Chris Kiplimo" required /></label>
+              <label>Password<input name="password" type="password" placeholder="Create a secure password" required /></label>
               <label>Phone<input name="phone" placeholder="+254700000001" required /></label>
               <label>Email<input name="email" type="email" placeholder="farmer@example.com" /></label>
+              <label>Role
+                <select name="role">
+                  <option value="farmer">Farmer</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
               <label>County<input name="county" value="Uasin Gishu" /></label>
               <label>Farm Size Acres<input name="farm_size_acres" type="number" step="0.01" placeholder="2.5" /></label>
               <label>Soil Type
@@ -276,6 +356,18 @@ root.innerHTML = `
       <article class="panel form-panel">
         <div class="panel-head">
           <div>
+            <h2 class="panel-title">App Overview</h2>
+            <div class="panel-kicker">A product-style summary of what is stored, what is live, and whether the installable web shell is ready.</div>
+          </div>
+        </div>
+        <div class="activity" id="overview-activity">
+          <div class="activity-item">Waiting for database overview.</div>
+        </div>
+      </article>
+
+      <article class="panel form-panel">
+        <div class="panel-head">
+          <div>
             <h2 class="panel-title">Record Manager</h2>
             <div class="panel-kicker">Basic edit and delete controls for stored records.</div>
           </div>
@@ -308,7 +400,16 @@ const setText = (id: string, value: string) => {
   if (node) node.textContent = value;
 };
 
+const setHidden = (id: string, hidden: boolean) => {
+  const node = document.getElementById(id);
+  if (node) node.classList.toggle("hidden", hidden);
+};
+
 const token = (): string | null => localStorage.getItem(storageKeys.token);
+const authUser = (): User | null => {
+  const raw = localStorage.getItem(storageKeys.authUser);
+  return raw ? (JSON.parse(raw) as User) : null;
+};
 const activeUserId = (): string | null => localStorage.getItem(storageKeys.userId);
 const activeCropPlanId = (): string | null => localStorage.getItem(storageKeys.cropPlanId);
 const setActiveUserId = (id: string | null) => id && localStorage.setItem(storageKeys.userId, id);
@@ -322,6 +423,8 @@ const fmtSignedPercent = (value: number | null | undefined) => {
   const num = Number(value);
   return `${num > 0 ? "+" : ""}${num.toLocaleString()}%`;
 };
+
+const fmtCount = (value: number | null | undefined) => Number(value || 0).toLocaleString();
 
 const toPayload = (form: HTMLFormElement): Record<string, string | number> => {
   const data = new FormData(form);
@@ -379,7 +482,13 @@ const fillSelect = <T extends { id: string }>(
 };
 
 const updateAuthStatus = () => {
-  setText("auth-status", token() ? "Authenticated workspace ready." : "Not logged in.");
+  const current = authUser();
+  setText(
+    "auth-status",
+    token() && current
+      ? `Authenticated as ${current.username} (${current.role}).`
+      : "Not logged in.",
+  );
 };
 
 const updateActiveBadge = () => {
@@ -524,6 +633,50 @@ const loadHarvests = async () => {
   );
 };
 
+const refreshPlatformStatus = async () => {
+  const data = await apiFetch<AppStatus>("/api/status");
+  setText("database-mode", data.database.backend.toUpperCase());
+  setText(
+    "database-note",
+    data.database.backend === "postgresql"
+      ? "PostgreSQL is active for persistent multi-record storage."
+      : data.database.using_default_sqlite
+        ? "Running on the local SQLite fallback. Copy .env.example to switch to PostgreSQL."
+        : "Using a custom database connection string.",
+  );
+  setText(
+    "platform-pill",
+    `${data.installable_web_app ? "Installable web app" : "Browser app"} • ${data.database.backend.toUpperCase()} backend • live preview from /analytics/dashboard`,
+  );
+};
+
+const refreshOverview = async () => {
+  const data = await apiFetch<OverviewData>("/analytics/overview");
+  const overviewMarkup = data.recent_activity.length
+    ? data.recent_activity
+        .map(
+          (item) =>
+            `<div class="activity-item"><strong>${item.type.replace("_", " ")}</strong><br>${item.title}<br><span class="muted-inline">${item.detail}</span></div>`,
+        )
+        .join("")
+    : `<div class="activity-item">No stored database activity yet.</div>`;
+  setText("count-users", fmtCount(data.counts.users));
+  setText("count-plans", fmtCount(data.counts.crop_plans));
+  setText("count-records", fmtCount(data.counts.inputs + data.counts.harvests));
+  setText("latest-user", data.latest.user_name || "No farmer records yet.");
+  setText(
+    "latest-plan",
+    data.latest.crop_type
+      ? `${data.latest.crop_type.toUpperCase()} • season ${data.latest.season_year ?? "--"}`
+      : "No crop plans yet.",
+  );
+  setText(
+    "record-summary",
+    `${fmtCount(data.counts.inputs)} inputs • ${fmtCount(data.counts.harvests)} harvests • ${fmtCount(data.counts.fertilizer_recommendations)} fertilizer guides`,
+  );
+  renderRecordList("overview-activity", overviewMarkup);
+};
+
 const refreshDashboard = async () => {
   const url = activeUserId()
     ? `/analytics/dashboard?user_id=${encodeURIComponent(activeUserId() as string)}`
@@ -556,6 +709,8 @@ const refreshDashboard = async () => {
 };
 
 const refreshAll = async () => {
+  await refreshPlatformStatus();
+  await refreshOverview();
   await loadUsers();
   await loadCropPlans();
   await loadInputs();
@@ -584,12 +739,14 @@ const deleteJSON = <T>(url: string) =>
   event.preventDefault();
   const result = await postJSON<AuthResponse>("/auth/login", toPayload(event.currentTarget as HTMLFormElement));
   localStorage.setItem(storageKeys.token, result.access_token);
+  localStorage.setItem(storageKeys.authUser, JSON.stringify(result.user));
   updateAuthStatus();
-  logActivity("Logged in successfully.");
+  logActivity(`Logged in as ${result.user.username}.`);
 });
 
 (document.getElementById("logout-button") as HTMLButtonElement).addEventListener("click", () => {
   localStorage.removeItem(storageKeys.token);
+  localStorage.removeItem(storageKeys.authUser);
   updateAuthStatus();
   logActivity("Logged out.");
 });
@@ -600,10 +757,11 @@ const deleteJSON = <T>(url: string) =>
   const created = await postJSON<User>("/users/", toPayload(form));
   setActiveUserId(created.id);
   form.reset();
+  (form.elements.namedItem("role") as HTMLSelectElement).value = "farmer";
   (form.elements.namedItem("county") as HTMLInputElement).value = "Uasin Gishu";
   (form.elements.namedItem("soil_type") as HTMLSelectElement).value = "loam";
   await refreshAll();
-  logActivity(`Created farmer ${created.full_name || created.phone}.`);
+  logActivity(`Created farmer account ${created.username}.`);
 });
 
 (document.getElementById("crop-plan-form") as HTMLFormElement).addEventListener("submit", async (event) => {
@@ -649,6 +807,25 @@ const deleteJSON = <T>(url: string) =>
 
 (document.getElementById("refresh-preview") as HTMLButtonElement).addEventListener("click", () => {
   void refreshDashboard();
+});
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event as BeforeInstallPromptEvent;
+  setHidden("install-app-button", false);
+});
+
+(document.getElementById("install-app-button") as HTMLButtonElement).addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  await deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  logActivity(
+    choice.outcome === "accepted"
+      ? "Install prompt accepted."
+      : "Install prompt dismissed.",
+  );
+  deferredInstallPrompt = null;
+  setHidden("install-app-button", true);
 });
 
 document.addEventListener("click", async (event) => {
@@ -718,6 +895,13 @@ document.addEventListener("click", async (event) => {
     logActivity(`Updated ${kind}.`);
   }
 });
+
+if ("serviceWorker" in navigator) {
+  void navigator.serviceWorker.register("/static/service-worker.js").catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : "Service worker registration failed";
+    logActivity(message);
+  });
+}
 
 updateAuthStatus();
 void refreshAll().catch((error: unknown) => {

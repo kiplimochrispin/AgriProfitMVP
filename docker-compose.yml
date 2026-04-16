@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16
+    container_name: agriprofit-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agriprofit}
+      POSTGRES_USER: ${POSTGRES_USER:-agriprofit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agriprofit}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agriprofit} -d ${POSTGRES_DB:-agriprofit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    container_name: agriprofit-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://agriprofit:agriprofit@db:5432/agriprofit}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      SECRET_KEY: ${SECRET_KEY:-replace-this-with-a-long-random-secret}
+      AUTO_CREATE_SCHEMA: "false"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  backup:
+    image: postgres:16
+    container_name: agriprofit-backup
+    profiles: ["ops"]
+    env_file:
+      - .env
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-agriprofit}
+    volumes:
+      - ./backups:/backups
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - >-
+        pg_dump --format=custom --no-owner
+        postgresql://${POSTGRES_USER:-agriprofit}:${POSTGRES_PASSWORD:-agriprofit}@db:5432/${POSTGRES_DB:-agriprofit}
+        > /backups/agriprofit_$(date +%Y%m%d_%H%M%S).dump
+
+volumes:
+  postgres_data:

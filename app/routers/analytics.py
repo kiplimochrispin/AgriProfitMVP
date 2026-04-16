@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.calculations import calculate_fertilizer_needs
-from app.database import get_db
+from app.database import database_backend, get_db, using_default_sqlite
 
 router = APIRouter()
 
@@ -250,6 +250,104 @@ def build_dashboard_for_user(db: Session, user: models.User):
     }
 
 
+def build_overview(db: Session):
+    users = db.query(models.User).all()
+    crop_plans = db.query(models.CropPlan).all()
+    inputs = db.query(models.InputUsage).all()
+    harvests = db.query(models.HarvestRecord).all()
+    recommendations = db.query(models.FertilizerRecommendation).all()
+    audit_logs = (
+        db.query(models.AuditLog).order_by(models.AuditLog.created_at.desc()).limit(8).all()
+    )
+
+    latest_user = max(users, key=lambda item: item.created_at, default=None)
+    latest_plan = max(crop_plans, key=lambda item: item.created_at, default=None)
+    latest_input = max(inputs, key=lambda item: item.created_at, default=None)
+    latest_harvest = max(harvests, key=lambda item: item.created_at, default=None)
+    user_lookup = {user.id: user for user in users}
+    plan_lookup = {plan.id: plan for plan in crop_plans}
+    season_years = sorted({plan.season_year for plan in crop_plans})
+
+    recent_activity = [
+        {
+            "type": audit.entity_type,
+            "title": audit.summary,
+            "detail": f"{audit.action} by {audit.actor}",
+            "created_at": audit.created_at.isoformat(),
+        }
+        for audit in audit_logs
+    ]
+    if not recent_activity:
+        if latest_user is not None:
+            recent_activity.append(
+                {
+                    "type": "farmer",
+                    "title": latest_user.full_name or latest_user.phone,
+                    "detail": f"{latest_user.county} • {latest_user.soil_type or 'soil pending'}",
+                    "created_at": latest_user.created_at.isoformat(),
+                }
+            )
+        if latest_plan is not None:
+            owner = user_lookup.get(latest_plan.user_id)
+            recent_activity.append(
+                {
+                    "type": "crop_plan",
+                    "title": latest_plan.crop_type.title(),
+                    "detail": (
+                        f"{as_float(latest_plan.acres):,.2f} ac • {latest_plan.season_year}"
+                        + (f" • {owner.full_name or owner.phone}" if owner is not None else "")
+                    ),
+                    "created_at": latest_plan.created_at.isoformat(),
+                }
+            )
+        if latest_input is not None:
+            recent_activity.append(
+                {
+                    "type": "input",
+                    "title": latest_input.item_name,
+                    "detail": f"{latest_input.category} • KSh {as_float(latest_input.cost_ksh):,.0f}",
+                    "created_at": latest_input.created_at.isoformat(),
+                }
+            )
+        if latest_harvest is not None:
+            plan = plan_lookup.get(latest_harvest.crop_plan_id)
+            recent_activity.append(
+                {
+                    "type": "harvest",
+                    "title": f"{as_float(latest_harvest.actual_yield_kg_total):,.0f} kg harvest",
+                    "detail": (
+                        f"KSh {as_float(latest_harvest.selling_price_per_kg):,.0f}/kg"
+                        + (f" • {plan.crop_type}" if plan is not None else "")
+                    ),
+                    "created_at": latest_harvest.created_at.isoformat(),
+                }
+            )
+
+    return {
+        "database": {
+            "backend": database_backend(),
+            "using_default_sqlite": using_default_sqlite(),
+        },
+        "counts": {
+            "users": len(users),
+            "crop_plans": len(crop_plans),
+            "inputs": len(inputs),
+            "harvests": len(harvests),
+            "fertilizer_recommendations": len(recommendations),
+        },
+        "latest": {
+            "user_name": (latest_user.full_name or latest_user.phone) if latest_user is not None else None,
+            "crop_type": latest_plan.crop_type if latest_plan is not None else None,
+            "season_year": max(season_years) if season_years else None,
+        },
+        "recent_activity": sorted(
+            recent_activity,
+            key=lambda item: item["created_at"],
+            reverse=True,
+        ),
+    }
+
+
 @router.get("/fertilizer-recommendation")
 def get_fertilizer_recommendation(
     crop: str,
@@ -306,3 +404,34 @@ def get_dashboard(
         return build_dashboard_for_user(db, user)
     except SQLAlchemyError:
         return fallback_dashboard()
+
+
+@router.get("/overview")
+def get_overview(db: Session = Depends(get_db)):
+    empty_response = {
+        "database": {
+            "backend": database_backend(),
+            "using_default_sqlite": using_default_sqlite(),
+        },
+        "counts": {
+            "users": 0,
+            "crop_plans": 0,
+            "inputs": 0,
+            "harvests": 0,
+            "fertilizer_recommendations": 0,
+        },
+        "latest": {
+            "user_name": None,
+            "crop_type": None,
+            "season_year": None,
+        },
+        "recent_activity": [],
+    }
+
+    if db is None:
+        return empty_response
+
+    try:
+        return build_overview(db)
+    except SQLAlchemyError:
+        return empty_response

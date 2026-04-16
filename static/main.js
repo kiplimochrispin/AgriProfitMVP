@@ -1,6 +1,7 @@
 "use strict";
 const storageKeys = {
     token: "agriprofit.authToken",
+    authUser: "agriprofit.authUser",
     userId: "agriprofit.activeUserId",
     cropPlanId: "agriprofit.activeCropPlanId",
 };
@@ -11,6 +12,7 @@ const state = {
     harvests: [],
 };
 const root = document.getElementById("app");
+let deferredInstallPrompt = null;
 if (!root) {
     throw new Error("Missing #app root element");
 }
@@ -24,8 +26,34 @@ root.innerHTML = `
           <div class="brand-note">Profit-first farm intelligence</div>
         </div>
       </div>
-      <div class="status-pill">TypeScript frontend • live preview from <code>/analytics/dashboard</code></div>
+      <div class="masthead-actions">
+        <div class="status-pill" id="platform-pill">TypeScript frontend • live preview from <code>/analytics/dashboard</code></div>
+        <button class="button alt install-button hidden" type="button" id="install-app-button">Install Web App</button>
+      </div>
     </header>
+
+    <section class="app-strip">
+      <div class="panel strip-card">
+        <div class="strip-label">Database Mode</div>
+        <div class="strip-value" id="database-mode">--</div>
+        <div class="strip-meta" id="database-note">Waiting for runtime status.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Farmers</div>
+        <div class="strip-value" id="count-users">0</div>
+        <div class="strip-meta" id="latest-user">No farmer records yet.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Crop Plans</div>
+        <div class="strip-value" id="count-plans">0</div>
+        <div class="strip-meta" id="latest-plan">No crop plans yet.</div>
+      </div>
+      <div class="panel strip-card">
+        <div class="strip-label">Data Coverage</div>
+        <div class="strip-value" id="count-records">0</div>
+        <div class="strip-meta" id="record-summary">Inputs and harvests are empty.</div>
+      </div>
+    </section>
 
     <section class="hero">
       <div class="panel hero-copy">
@@ -113,7 +141,7 @@ root.innerHTML = `
 
         <form id="login-form" class="stack">
           <div class="field-grid">
-            <label>Username<input name="username" value="admin" required /></label>
+            <label>Username Or Phone<input name="username" value="admin" required /></label>
             <label>Password<input name="password" type="password" value="admin123" required /></label>
           </div>
           <div class="form-actions">
@@ -135,9 +163,18 @@ root.innerHTML = `
         <div class="stack">
           <form id="user-form" class="stack">
             <div class="field-grid">
+              <label>Username<input name="username" placeholder="farmer1" required /></label>
               <label>Farmer Name<input name="full_name" placeholder="Chris Kiplimo" required /></label>
+              <label>Password<input name="password" type="password" placeholder="Create a secure password" required /></label>
               <label>Phone<input name="phone" placeholder="+254700000001" required /></label>
               <label>Email<input name="email" type="email" placeholder="farmer@example.com" /></label>
+              <label>Role
+                <select name="role">
+                  <option value="farmer">Farmer</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
               <label>County<input name="county" value="Uasin Gishu" /></label>
               <label>Farm Size Acres<input name="farm_size_acres" type="number" step="0.01" placeholder="2.5" /></label>
               <label>Soil Type
@@ -211,6 +248,18 @@ root.innerHTML = `
       <article class="panel form-panel">
         <div class="panel-head">
           <div>
+            <h2 class="panel-title">App Overview</h2>
+            <div class="panel-kicker">A product-style summary of what is stored, what is live, and whether the installable web shell is ready.</div>
+          </div>
+        </div>
+        <div class="activity" id="overview-activity">
+          <div class="activity-item">Waiting for database overview.</div>
+        </div>
+      </article>
+
+      <article class="panel form-panel">
+        <div class="panel-head">
+          <div>
             <h2 class="panel-title">Record Manager</h2>
             <div class="panel-kicker">Basic edit and delete controls for stored records.</div>
           </div>
@@ -242,7 +291,16 @@ const setText = (id, value) => {
     if (node)
         node.textContent = value;
 };
+const setHidden = (id, hidden) => {
+    const node = document.getElementById(id);
+    if (node)
+        node.classList.toggle("hidden", hidden);
+};
 const token = () => localStorage.getItem(storageKeys.token);
+const authUser = () => {
+    const raw = localStorage.getItem(storageKeys.authUser);
+    return raw ? JSON.parse(raw) : null;
+};
 const activeUserId = () => localStorage.getItem(storageKeys.userId);
 const activeCropPlanId = () => localStorage.getItem(storageKeys.cropPlanId);
 const setActiveUserId = (id) => id && localStorage.setItem(storageKeys.userId, id);
@@ -254,6 +312,7 @@ const fmtSignedPercent = (value) => {
     const num = Number(value);
     return `${num > 0 ? "+" : ""}${num.toLocaleString()}%`;
 };
+const fmtCount = (value) => Number(value || 0).toLocaleString();
 const toPayload = (form) => {
     const data = new FormData(form);
     const result = {};
@@ -304,7 +363,10 @@ const fillSelect = (id, items, labeler, selected) => {
         .join("");
 };
 const updateAuthStatus = () => {
-    setText("auth-status", token() ? "Authenticated workspace ready." : "Not logged in.");
+    const current = authUser();
+    setText("auth-status", token() && current
+        ? `Authenticated as ${current.username} (${current.role}).`
+        : "Not logged in.");
 };
 const updateActiveBadge = () => {
     const active = state.users.find((user) => user.id === activeUserId()) || state.users[0];
@@ -421,6 +483,33 @@ const loadHarvests = async () => {
         .map((h) => `<div class="activity-item"><strong>${Number(h.actual_yield_kg_total || 0).toLocaleString()} kg</strong><br>KSh ${Number(h.selling_price_per_kg || 0).toLocaleString()}/kg${actionButtons("harvest", h.id)}</div>`)
         .join(""));
 };
+const refreshPlatformStatus = async () => {
+    const data = await apiFetch("/api/status");
+    setText("database-mode", data.database.backend.toUpperCase());
+    setText("database-note", data.database.backend === "postgresql"
+        ? "PostgreSQL is active for persistent multi-record storage."
+        : data.database.using_default_sqlite
+            ? "Running on the local SQLite fallback. Copy .env.example to switch to PostgreSQL."
+            : "Using a custom database connection string.");
+    setText("platform-pill", `${data.installable_web_app ? "Installable web app" : "Browser app"} • ${data.database.backend.toUpperCase()} backend • live preview from /analytics/dashboard`);
+};
+const refreshOverview = async () => {
+    const data = await apiFetch("/analytics/overview");
+    const overviewMarkup = data.recent_activity.length
+        ? data.recent_activity
+            .map((item) => `<div class="activity-item"><strong>${item.type.replace("_", " ")}</strong><br>${item.title}<br><span class="muted-inline">${item.detail}</span></div>`)
+            .join("")
+        : `<div class="activity-item">No stored database activity yet.</div>`;
+    setText("count-users", fmtCount(data.counts.users));
+    setText("count-plans", fmtCount(data.counts.crop_plans));
+    setText("count-records", fmtCount(data.counts.inputs + data.counts.harvests));
+    setText("latest-user", data.latest.user_name || "No farmer records yet.");
+    setText("latest-plan", data.latest.crop_type
+        ? `${data.latest.crop_type.toUpperCase()} • season ${data.latest.season_year ?? "--"}`
+        : "No crop plans yet.");
+    setText("record-summary", `${fmtCount(data.counts.inputs)} inputs • ${fmtCount(data.counts.harvests)} harvests • ${fmtCount(data.counts.fertilizer_recommendations)} fertilizer guides`);
+    renderRecordList("overview-activity", overviewMarkup);
+};
 const refreshDashboard = async () => {
     const url = activeUserId()
         ? `/analytics/dashboard?user_id=${encodeURIComponent(activeUserId())}`
@@ -445,6 +534,8 @@ const refreshDashboard = async () => {
     renderBars(fert.labels.length ? fert.labels : [data.crop_type || "Crop"], fert.used_per_acre.length ? fert.used_per_acre : [data.avg_fert_used || 0], fert.recommended_per_acre.length ? fert.recommended_per_acre : [data.recommended_fert || 0]);
 };
 const refreshAll = async () => {
+    await refreshPlatformStatus();
+    await refreshOverview();
     await loadUsers();
     await loadCropPlans();
     await loadInputs();
@@ -466,11 +557,13 @@ document.getElementById("login-form").addEventListener("submit", async (event) =
     event.preventDefault();
     const result = await postJSON("/auth/login", toPayload(event.currentTarget));
     localStorage.setItem(storageKeys.token, result.access_token);
+    localStorage.setItem(storageKeys.authUser, JSON.stringify(result.user));
     updateAuthStatus();
-    logActivity("Logged in successfully.");
+    logActivity(`Logged in as ${result.user.username}.`);
 });
 document.getElementById("logout-button").addEventListener("click", () => {
     localStorage.removeItem(storageKeys.token);
+    localStorage.removeItem(storageKeys.authUser);
     updateAuthStatus();
     logActivity("Logged out.");
 });
@@ -480,10 +573,11 @@ document.getElementById("user-form").addEventListener("submit", async (event) =>
     const created = await postJSON("/users/", toPayload(form));
     setActiveUserId(created.id);
     form.reset();
+    form.elements.namedItem("role").value = "farmer";
     form.elements.namedItem("county").value = "Uasin Gishu";
     form.elements.namedItem("soil_type").value = "loam";
     await refreshAll();
-    logActivity(`Created farmer ${created.full_name || created.phone}.`);
+    logActivity(`Created farmer account ${created.username}.`);
 });
 document.getElementById("crop-plan-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -525,6 +619,22 @@ document.getElementById("harvest-form").addEventListener("submit", async (event)
 });
 document.getElementById("refresh-preview").addEventListener("click", () => {
     void refreshDashboard();
+});
+window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    setHidden("install-app-button", false);
+});
+document.getElementById("install-app-button").addEventListener("click", async () => {
+    if (!deferredInstallPrompt)
+        return;
+    await deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice;
+    logActivity(choice.outcome === "accepted"
+        ? "Install prompt accepted."
+        : "Install prompt dismissed.");
+    deferredInstallPrompt = null;
+    setHidden("install-app-button", true);
 });
 document.addEventListener("click", async (event) => {
     const target = event.target.closest("button[data-action]");
@@ -598,6 +708,12 @@ document.addEventListener("click", async (event) => {
         logActivity(`Updated ${kind}.`);
     }
 });
+if ("serviceWorker" in navigator) {
+    void navigator.serviceWorker.register("/static/service-worker.js").catch((error) => {
+        const message = error instanceof Error ? error.message : "Service worker registration failed";
+        logActivity(message);
+    });
+}
 updateAuthStatus();
 void refreshAll().catch((error) => {
     const message = error instanceof Error ? error.message : "Unknown startup issue";

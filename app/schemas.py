@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class UserBase(BaseModel):
+    username: str
     phone: str
     email: str | None = None
     full_name: str | None = None
@@ -14,7 +15,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    pass
+    password: str
 
 
 class UserRead(UserBase):
@@ -25,13 +26,28 @@ class UserRead(UserBase):
 
 
 class UserUpdate(BaseModel):
+    username: str | None = None
     phone: str | None = None
     email: str | None = None
+    password: str | None = None
+    is_active: bool | None = None
     full_name: str | None = None
     role: str | None = None
     county: str | None = None
     farm_size_acres: float | None = None
     soil_type: str | None = None
+
+
+class AuthUserRead(BaseModel):
+    id: str
+    username: str
+    phone: str
+    email: str | None = None
+    full_name: str | None = None
+    role: str
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CropPlanBase(BaseModel):
@@ -147,6 +163,19 @@ class FertilizerRecommendationRead(FertilizerRecommendationBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AuditLogRead(BaseModel):
+    id: int
+    actor: str
+    action: str
+    entity_type: str
+    entity_id: str
+    summary: str
+    payload_json: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -155,3 +184,4 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: AuthUserRead

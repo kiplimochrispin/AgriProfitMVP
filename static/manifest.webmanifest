@@ -1,0 +1,17 @@
+{
+  "name": "AgriProfit",
+  "short_name": "AgriProfit",
+  "description": "Profit-first farm intelligence for farmers, crop plans, inputs, harvests, and fertilizer guidance.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#203328",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

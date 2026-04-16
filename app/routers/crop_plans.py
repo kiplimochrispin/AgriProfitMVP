@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
-from uuid import uuid4
 
 from app import crud, schemas
 from app.database import get_db
@@ -21,15 +22,15 @@ def list_crop_plans(db: Session = Depends(get_db)):
 def create_crop_plan(
     payload: schemas.CropPlanCreate,
     db: Session = Depends(get_db),
-    _: str = Depends(require_auth),
+    actor: str = Depends(require_auth),
 ):
     if db is None:
         return schemas.CropPlanRead(
             id=str(uuid4()),
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             **payload.model_dump(),
         )
-    return crud.create_crop_plan(db, payload)
+    return crud.create_crop_plan(db, payload, actor=actor.username)
 
 
 @router.patch("/{crop_plan_id}", response_model=schemas.CropPlanRead)
@@ -37,9 +38,9 @@ def update_crop_plan(
     crop_plan_id: str,
     payload: schemas.CropPlanUpdate,
     db: Session = Depends(get_db),
-    _: str = Depends(require_auth),
+    actor: str = Depends(require_auth),
 ):
-    crop_plan = crud.update_crop_plan(db, crop_plan_id, payload)
+    crop_plan = crud.update_crop_plan(db, crop_plan_id, payload, actor=actor.username)
     if crop_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crop plan not found")
     return crop_plan
@@ -49,9 +50,9 @@ def update_crop_plan(
 def delete_crop_plan(
     crop_plan_id: str,
     db: Session = Depends(get_db),
-    _: str = Depends(require_auth),
+    actor: str = Depends(require_auth),
 ):
-    deleted = crud.delete_crop_plan(db, crop_plan_id)
+    deleted = crud.delete_crop_plan(db, crop_plan_id, actor=actor.username)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Crop plan not found")
     return {"status": "deleted"}
